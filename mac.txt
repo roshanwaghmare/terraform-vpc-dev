@@ -1,0 +1,240 @@
+Step 1: Create AWS Backend Resources
+
+Create an S3 bucket for Terraform state and a DynamoDB table for locking.
+
+resource "aws_s3_bucket" "terraform_state" {
+  bucket = "terraform-prod-state"
+}
+
+resource "aws_dynamodb_table" "terraform_locks" {
+  name         = "terraform-locks"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
+
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
+}
+
+Apply:
+
+terraform init
+terraform apply
+Step 2: Configure Remote State
+
+Create backend.tf
+
+terraform {
+  backend "s3" {
+    bucket         = "terraform-prod-state"
+    key            = "prod/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
+  }
+}
+
+Initialize:
+
+terraform init -migrate-state
+Step 3: Create GitHub Repository Structure
+terraform-project/
+├── .github/
+│   └── workflows/
+│       ├── terraform-plan.yml
+│       └── terraform-apply.yml
+├── main.tf
+├── variables.tf
+├── outputs.tf
+├── backend.tf
+└── providers.tf
+
+Push code:
+
+git init
+git add .
+git commit -m "Initial commit"
+git push origin main
+Step 4: Configure GitHub OIDC Authentication
+Create IAM OIDC Provider
+
+Go to AWS:
+
+IAM
+ └── Identity Providers
+      └── Add Provider
+
+Provider:
+
+Provider Type: OpenID Connect
+
+Provider URL:
+https://token.actions.githubusercontent.com
+
+Audience:
+sts.amazonaws.com
+Step 5: Create IAM Role for GitHub Actions
+
+Trust Policy:
+
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        }
+      }
+    }
+  ]
+}
+
+Attach permissions:
+
+AmazonS3FullAccess
+AmazonEC2FullAccess
+IAM permissions required by Terraform
+
+(For production, use least-privilege policies instead of FullAccess.)
+
+Step 6: Create GitHub Environment
+
+In GitHub:
+
+Repository
+ └── Settings
+      └── Environments
+           └── New Environment
+
+Create:
+
+production
+
+Add:
+
+Required Reviewers
+
+This creates the manual approval gate.
+
+Step 7: Create Terraform Plan Workflow
+
+.github/workflows/terraform-plan.yml
+
+name: Terraform Plan
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/github-terraform-role
+          aws-region: us-east-1
+
+      - run: terraform init
+
+      - run: terraform fmt -check
+
+      - run: terraform validate
+
+      - run: terraform plan -out=tfplan
+Step 8: Create Terraform Apply Workflow
+
+.github/workflows/terraform-apply.yml
+
+name: Terraform Apply
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/github-terraform-role
+          aws-region: us-east-1
+
+      - run: terraform init
+
+      - run: terraform apply -auto-approve
+Step 9: Test the Pipeline
+
+Create a resource:
+
+resource "aws_s3_bucket" "demo" {
+  bucket = "my-demo-bucket-123456"
+}
+
+Commit:
+
+git add .
+git commit -m "Add S3 bucket"
+git push
+
+Expected:
+
+Git Push
+  ↓
+Pull Request
+  ↓
+Terraform Plan Runs
+  ↓
+Plan Output Visible
+Step 10: Apply Infrastructure
+
+Go to:
+
+GitHub
+ └── Actions
+      └── Terraform Apply
+           └── Run Workflow
+
+GitHub will pause at:
+
+production environment
+Waiting for approval
+
+Approve:
+
+Review deployments
+Approve and deploy
+
+Then:
+
+terraform apply
+
+runs automatically.
