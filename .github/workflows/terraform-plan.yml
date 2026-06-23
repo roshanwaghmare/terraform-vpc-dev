@@ -1,9 +1,9 @@
-name: Terraform Plan
+name: Terraform Plan 
 
 on:
   pull_request:
     branches:
-      - main
+      - aws-oidc-test
 
 permissions:
   id-token: write
@@ -20,8 +20,11 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/github-terraform-role
+          role-to-assume: ${{secrets.AWS_IAM_ROLE}}
           aws-region: us-east-1
+      
+      - name: Test AWS Credentials
+        run: aws sts get-caller-identity
 
       - run: terraform init
 
