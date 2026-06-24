@@ -97,7 +97,7 @@ resource "aws_eip" "eip" {
 
 resource "aws_nat_gateway" "yt-nat" {
   subnet_id     = element(aws_subnet.private_subnet[*].id, 0) # since i want nat in only one subnet 
-  allocation_id = "aws_eip.eip.id"
+  allocation_id = aws_eip.eip.id
   depends_on    = [aws_internet_gateway.igw_vpc]
 
   tags = {
