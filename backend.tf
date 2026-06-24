@@ -1,9 +1,9 @@
 terraform {
   backend "s3" {
-    bucket         = "terraform-prod-state"
-    key            = "prod/terraform.tfstate"
+    bucket         = "aws-with-roshan"
+    key            = "terraform.tfstate"
     region         = "us-east-1"
-    dynamodb_table = "terraform-locks"
+    dynamodb_table = "terraform-locks-github"
     encrypt        = true
   }
 }
