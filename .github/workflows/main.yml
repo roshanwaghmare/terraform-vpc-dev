@@ -1,0 +1,92 @@
+name: Terraform
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Select action to perform'
+        required: true
+        type: choice
+        options:
+          - apply
+          - destroy
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  plan:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::670412093018:role/github-action-role
+          aws-region: us-east-1
+
+      - name: Test AWS Credentials
+        run: aws sts get-caller-identity
+
+      - run: terraform init
+
+      - run: terraform fmt -check
+
+      - run: terraform validate
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: terraform
+          soft_fail: true
+
+      - run: terraform plan -out=tfplan
+
+  apply:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::670412093018:role/github-action-role
+          aws-region: us-east-1
+
+      - run: terraform init
+
+      - run: terraform apply -auto-approve
+
+  destroy:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::670412093018:role/github-action-role
+          aws-region: us-east-1
+
+      - run: terraform init
+
+      - run: terraform plan -destroy -out=destroyplan
+
+      - run: terraform apply destroyplan
