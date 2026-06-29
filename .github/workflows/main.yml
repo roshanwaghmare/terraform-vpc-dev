@@ -1,17 +1,21 @@
 name: Terraform
 
 on:
+  pull_request:
+    branches:
+      - main
+
   push:
     branches:
       - main
+
   workflow_dispatch:
     inputs:
       action:
-        description: 'Select action to perform'
+        description: "Terraform Action"
         required: true
         type: choice
         options:
-          - apply
           - destroy
 
 permissions:
@@ -19,11 +23,17 @@ permissions:
   contents: read
 
 jobs:
-  plan:
-    if: github.event_name == 'push'
+
+################################################################################
+# PR VALIDATION
+################################################################################
+
+  pr-validation:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
+
       - uses: actions/checkout@v4
 
       - uses: hashicorp/setup-terraform@v3
@@ -33,30 +43,74 @@ jobs:
           role-to-assume: arn:aws:iam::670412093018:role/github-action-role
           aws-region: us-east-1
 
-      - name: Test AWS Credentials
-        run: aws sts get-caller-identity
+      - name: Terraform Init
+        run: terraform init
 
-      - run: terraform init
+      - name: Terraform Format
+        run: terraform fmt -check
 
-      - run: terraform fmt -check
+      - name: Terraform Validate
+        run: terraform validate
 
-      - run: terraform validate
+      - name: Terraform Plan
+        run: terraform plan
 
-      - name: Run Checkov
+      - name: Checkov Scan
         uses: bridgecrewio/checkov-action@v12
         with:
           directory: .
           framework: terraform
           soft_fail: true
 
-      - run: terraform plan -out=tfplan
+################################################################################
+# PRODUCTION PLAN
+################################################################################
+
+  production-plan:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    outputs:
+      plan-created: true
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::670412093018:role/github-action-role
+          aws-region: us-east-1
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: tfplan
+
+################################################################################
+# APPLY (Manual Approval)
+################################################################################
 
   apply:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
+    if: github.event_name == 'push'
+    needs: production-plan
+
     runs-on: ubuntu-latest
-    environment: production
+
+    environment:
+      name: production
 
     steps:
+
       - uses: actions/checkout@v4
 
       - uses: hashicorp/setup-terraform@v3
@@ -66,16 +120,32 @@ jobs:
           role-to-assume: arn:aws:iam::670412093018:role/github-action-role
           aws-region: us-east-1
 
-      - run: terraform init
+      - name: Terraform Init
+        run: terraform init
 
-      - run: terraform apply -auto-approve
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+################################################################################
+# DESTROY (Manual Trigger Only)
+################################################################################
 
   destroy:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+    if: github.event_name == 'workflow_dispatch' &&
+        github.event.inputs.action == 'destroy'
+
     runs-on: ubuntu-latest
-    environment: production
+
+    environment:
+      name: production
 
     steps:
+
       - uses: actions/checkout@v4
 
       - uses: hashicorp/setup-terraform@v3
@@ -85,8 +155,11 @@ jobs:
           role-to-assume: arn:aws:iam::670412093018:role/github-action-role
           aws-region: us-east-1
 
-      - run: terraform init
+      - name: Terraform Init
+        run: terraform init
 
-      - run: terraform plan -destroy -out=destroyplan
+      - name: Terraform Destroy Plan
+        run: terraform plan -destroy -out=destroyplan
 
-      - run: terraform apply destroyplan
+      - name: Terraform Destroy
+        run: terraform apply -auto-approve destroyplan
