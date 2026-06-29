@@ -16,6 +16,7 @@ on:
         required: true
         type: choice
         options:
+          - apply
           - destroy
 
 permissions:
@@ -25,7 +26,7 @@ permissions:
 jobs:
 
 ################################################################################
-# PR VALIDATION
+# PR Validation
 ################################################################################
 
   pr-validation:
@@ -43,35 +44,27 @@ jobs:
           role-to-assume: arn:aws:iam::670412093018:role/github-action-role
           aws-region: us-east-1
 
-      - name: Terraform Init
-        run: terraform init
+      - run: terraform init
 
-      - name: Terraform Format
-        run: terraform fmt -check
+      - run: terraform fmt -check
 
-      - name: Terraform Validate
-        run: terraform validate
+      - run: terraform validate
 
-      - name: Terraform Plan
-        run: terraform plan
-
-      - name: Checkov Scan
-        uses: bridgecrewio/checkov-action@v12
+      - uses: bridgecrewio/checkov-action@v12
         with:
           directory: .
           framework: terraform
           soft_fail: true
 
+      - run: terraform plan
+
 ################################################################################
-# PRODUCTION PLAN
+# PLAN
 ################################################################################
 
-  production-plan:
+  plan:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-
-    outputs:
-      plan-created: true
 
     steps:
 
@@ -84,26 +77,33 @@ jobs:
           role-to-assume: arn:aws:iam::670412093018:role/github-action-role
           aws-region: us-east-1
 
-      - name: Terraform Init
-        run: terraform init
+      - run: terraform init
+
+      - run: terraform fmt -check
+
+      - run: terraform validate
+
+      - uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: terraform
+          soft_fail: true
 
       - name: Terraform Plan
         run: terraform plan -out=tfplan
 
-      - name: Upload Plan
+      - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
         with:
           name: tfplan
           path: tfplan
 
 ################################################################################
-# APPLY (Manual Approval)
+# APPLY
 ################################################################################
 
   apply:
-    if: github.event_name == 'push'
-    needs: production-plan
-
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
     runs-on: ubuntu-latest
 
     environment:
@@ -120,25 +120,22 @@ jobs:
           role-to-assume: arn:aws:iam::670412093018:role/github-action-role
           aws-region: us-east-1
 
-      - name: Terraform Init
-        run: terraform init
+      - run: terraform init
 
       - name: Download Plan
         uses: actions/download-artifact@v4
         with:
           name: tfplan
 
-      - name: Terraform Apply
+      - name: Apply Saved Plan
         run: terraform apply -auto-approve tfplan
 
 ################################################################################
-# DESTROY (Manual Trigger Only)
+# DESTROY
 ################################################################################
 
   destroy:
-    if: github.event_name == 'workflow_dispatch' &&
-        github.event.inputs.action == 'destroy'
-
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
     runs-on: ubuntu-latest
 
     environment:
@@ -155,11 +152,10 @@ jobs:
           role-to-assume: arn:aws:iam::670412093018:role/github-action-role
           aws-region: us-east-1
 
-      - name: Terraform Init
-        run: terraform init
+      - run: terraform init
 
-      - name: Terraform Destroy Plan
+      - name: Destroy Plan
         run: terraform plan -destroy -out=destroyplan
 
-      - name: Terraform Destroy
+      - name: Destroy Infrastructure
         run: terraform apply -auto-approve destroyplan
